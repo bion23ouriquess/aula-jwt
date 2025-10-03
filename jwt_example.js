@@ -17,7 +17,7 @@ console.log("JWT:", token);
 
 try {
   const decoded = jwt.verify(token, SECRET_KEY);
-  console.log("Decodificado:", decoded); 
+  console.log("Decodificado:", decoded);
 } catch (error) {
   console.error("Token inválido:", error.message);
 }

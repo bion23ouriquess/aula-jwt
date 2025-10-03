@@ -1,90 +1,88 @@
-import bcrypt from "bcrypt";
-import jwt from "jsonwebtoken";
-import type { Request, Response } from "express";
 import { prismaClient } from "../../prisma/prisma.ts";
+import type { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
+import type { Request, Response } from "express";
 
-export const register = async (
-  req: Request,
-  res: Response
-): Promise<Response> => {
+enum userColumns {
+  NAME = "name",
+  EMAIL = "email",
+  PASSWORD = "password"
+}
+
+export const listUsers = async (_: Request, res: Response) => {
   try {
-    const { email, password, name } = req.body;
-    // Validação básica
-    if (!email || !password) {
-      return res.status(400).json({ error: "Email e senha são obrigatórios" });
-    }
-    // Verificar se usuário já existe
-    const existingUser = await prismaClient.user.findUnique({
-      where: { email },
-    });
-    if (existingUser) {
-      return res.status(409).json({ error: "Usuário já existe" });
-    }
-    // Hash da senha com bcrypt
-    const saltRounds = 10;
-    const hashedPassword = await bcrypt.hash(password, saltRounds);
-    // Criar usuário no banco de dados
-    const user = await prismaClient.user.create({
-      data: { email, password: hashedPassword, name: name || null },
-      select: {
-        id: true,
-        email: true,
-        name: true,
-      },
-    });
-    return res.status(201).json(user);
+    const users = await prismaClient.user.findMany();
+    res.json(users);
   } catch (error) {
-    console.error("Erro no registro:", error);
-    res.status(500).json({ error: "Erro interno do servidor" });
+    console.log(error);
+    res.status(500).send(`Erro no servidor: ${error}`)
   }
-  return res.status(400).send("Not Found");
-};
+}
 
-// Ambiente de produção: use variáveis de ambiente
-const ACCESS_TOKEN_SECRET = "chaveSuperSecreta123";
-const REFRESH_TOKEN_SECRET = "chaveMuitoMuitoSecreta456";
-export const login = async (req: Request, res: Response): Promise<Response> => {
+export const listUserById = async (req: Request, res: Response) => {
   try {
-    const { email, password } = req.body;
-    const user = await prismaClient.user.findUnique({ where: { email } }); // Verificar se usuário existe e senha está correta
-    if (!user || !(await bcrypt.compare(password, user.password))) {
-        return res.status(401).json({ error: "Credenciais inválidas" });
-    } 
-    // Gerar access token (curta duração)
-    const accessToken = jwt.sign(
-      { userId: user.id, email: user.email, name: user.name },
-      ACCESS_TOKEN_SECRET,
-      { expiresIn: "15m" }
-    ); 
-    // Gerar refresh token (longa duração)
-    const refreshToken = jwt.sign({ userId: user.id }, REFRESH_TOKEN_SECRET, {
-      expiresIn: "7d",
-    }); 
-    // Armazenar refresh token no banco de dados
-    const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + 7);
-    await prismaClient.token.create({
+    const { params } = req;
+
+    const user = await prismaClient.user.findUnique({
+      where: {
+        id: Number(params.id),
+      }
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        message: "Usuário não existe no banco de dados."
+      })
+    }
+
+    return res.json(user);
+  } catch (error) {
+    console.log(error);
+    res.status(500).send(`Erro no servidor: ${error}`)
+  }
+}
+
+export const updateUser = async (req: Request, res: Response) => {
+  try {
+    const { params, body } = req
+    const bodyKeys: string[] = Object.keys(body)
+    for (const key of bodyKeys) {
+      if (key !== userColumns.NAME &&
+        key !== userColumns.PASSWORD &&
+        key !== userColumns.EMAIL) return res.status(404).send("Colunas não existentes")
+    }
+    const user = await prismaClient.user.update({
+      where: { id: Number(params.id) },
       data: {
-        token: refreshToken,
-        type: "refresh",
-        userId: user.id,
-        expiresAt,
+        ...body
       },
-    });
-    res
-      .status(200)
-      .json({
-        accessToken,
-        refreshToken,
-        user: {
-          id: user.id,
-          email: user.email,
-          name: user.name,
-        },
-      });
+    })
+    return res.status(200).json({
+      message: "Usuário atualizado!",
+      data: user
+    })
   } catch (error) {
-    console.error("Erro no login:", error);
-    res.status(500).json({ error: "Erro interno do servidor" });
+    if ((error as PrismaClientKnownRequestError).code == "P2025") {
+      res.status(404).send('Usuário não encontrado!')
+    }
+    console.log(error);
+    res.status(500).send(`Erro no servidor: ${error}`)
   }
-  return res;
-};
+}
+
+export const deleteUser = async (req: Request, res: Response) => {
+  try {
+    const { params } = req
+    await prismaClient.user.delete({
+      where: {
+        id: Number(params.id)
+      }
+    })
+    res.status(200).send("Usuário deletado com sucesso!")
+  } catch (error) {
+    if ((error as PrismaClientKnownRequestError).code == "P2025") {
+      res.status(404).send('Usuário não encontrado!')
+    }
+    console.log(error);
+    res.status(500).send(`Erro no servidor: ${error}`)
+  }
+}
